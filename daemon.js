@@ -21,7 +21,7 @@ function startup() {
 
 	info = JSON.parse(fs.readFileSync(__dirname+"/fragment_store.json"));
 	
-	serial = byteify(fs.readFileSync("/factory/serial_number").slice(0,16));
+	serial = byteify(fs.readFileSync("/factory/serial_number").toString().slice(0,16));
 
 	
 	
@@ -34,6 +34,11 @@ function startup() {
 		data = data.toString()
 		var req = data.charCodeAt(0);
 		var cmd = data.charCodeAt(1);
+		var out = ""
+		for (var a = 0; a < data.length; a++) {
+			out += "" + data.charCodeAt(a) + " ";
+		}
+		console.log(out);
 		switch(cmd) {
 			case 0x01:	
 				sp.write(new Buffer([req, 0xFF, createID()]))
@@ -101,6 +106,15 @@ function startup() {
 				}
 				sp.write(new Buffer([req, 0xF2, fragment.length/256, fragment.length].concat(byteify(fragment))));
 				break;
+			case 0x08:
+				if (!decrypted) {
+					console.error("Attempting to fetch fragment list of closed database");
+					sp.write(new Buffer([req, 0xEF]));
+					break;
+				}
+				var frags = JSON.stringify(Object.keys(decrypted.frags));
+				sp.write(new Buffer([req, 0xF2, frags.length/256, frags.length].concat(byteify(frags))));
+				break;
 			case 0x10:
 				var end = 3+data.charCodeAt(2)
 				var uname = (data.slice(3,end));
@@ -131,11 +145,16 @@ function startup() {
 				sp.write(new Buffer([req, 0xF1]));
 				break;
 			default:
-				console.error("Unknown command: "+data);
+				console.log("Packet of size: "+data.length);
+				var out = ""
+				for (var a = 0; a < data.length; a ++) {
+					out+=""+data.charCodeAt(a)+" "
+				}
+				console.error("Unknown command: "+out);
 				sp.write(new Buffer([req, 0xEF]));
 				break;
 		}
-		sp.write(new Buffer([0x0A]));
+		sp.write(new Buffer([0x7F]));
 	});
 }
 
@@ -185,3 +204,7 @@ function createID() {
 (function() {
 	startup()
 })()
+
+
+
+
