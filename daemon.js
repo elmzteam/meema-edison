@@ -15,25 +15,26 @@ var activeuser;
 function startup() {
 	if (!fs.existsSync(__dirname+"/fragment_store.json")) {
 		fs.writeFileSync(__dirname+"/fragment_store.json", JSON.stringify({
-			accounts: {},
+			accounts: [],
 		}))
 	}
 
-	info = fs.readFileSync(__dirname+"/fragment_store.json");
+	info = JSON.parse(fs.readFileSync(__dirname+"/fragment_store.json"));
 	
 	serial = byteify(fs.readFileSync("/factory/serial_number").slice(0,16));
 
 	
 	
 	var sp = new SerialPort("/dev/ttyGS0", {
-		parser: serialport.parsers.readline("\r"),
 		baudrate: 9600
 	});
 
 
 	sp.on("data", function (data) {
+		data = data.toString()
 		var req = data.charCodeAt(0);
-		switch(req) {
+		var cmd = data.charCodeAt(1);
+		switch(cmd) {
 			case 0x01:	
 				sp.write(new Buffer([req, 0xFF, createID()]))
 				break;
@@ -45,22 +46,22 @@ function startup() {
 				break;
 			case 0x04:
 				if (activeuser) {
-					var name = decrypted.
-					sp.write(new Buffer([req, 0xF2, activeuser.length/256, activeuser.length].concat(activeuser)));
+					var name = decrypted.username;
+					sp.write(new Buffer([req, 0xF2, activeuser.length/256, activeuser.length].concat(byteify(activeuser))));
 				} else {
 					console.error("Attempting to fetch user of non active database");
 					sp.write(new Buffer([req, 0xF0]));
 				}
 				break;
 			case 0x05:
-				var users = byteify(Object.keys(info.accounts));
-				sp.write(new Buffer[req, 0xF2,  users.length/256, users.length, users])
+				var users = byteify(info.accounts);
+				sp.write(new Buffer([req, 0xF2,  users.length/256, users.length].concat(users)))
 				break;
 			case 0x06:
 				var end = 3+data.charCodeAt(2)
-				var uname = stringify(data.slice(3,end));
-				var password = stringify(data.slice(end+1, end+data.charCodeAt(end)));
-				if (!(uname in info.accounts)) {
+				var uname = (data.slice(3,end));
+				var password = (data.slice(end+1, 1+end+data.charCodeAt(end)));
+				if (info.accounts.indexOf(uname) < 0) {
 					console.error("Attempting to sign in as invalid user");
 					sp.write(new Buffer([req, 0xEF]));
 					break;
@@ -83,7 +84,7 @@ function startup() {
 							console.error("Invalid decryption password")
 							sp.write(new Buffer([req, 0xFE, 0x00]));
 						}
-					}
+					})
 				})
 				break;
 			case 0x07:
@@ -92,7 +93,7 @@ function startup() {
 					sp.write(new Buffer([req, 0xEF]));
 					break;
 				}
-				var fragment = decrypted.frags[stringify(data.slice(3, 3+data.charCodeAt(2)))]
+				var fragment = decrypted.frags[(data.slice(3, 3+data.charCodeAt(2)))]
 				if (!fragment) {
 					console.error("Attempting to fetch nonexistent fragment");
 					sp.write(new Buffer([req, 0xEF]));
@@ -102,11 +103,11 @@ function startup() {
 				break;
 			case 0x10:
 				var end = 3+data.charCodeAt(2)
-				var uname = stringify(data.slice(3,end));
-				var password = stringify(data.slice(end+1, end+data.charCodeAt(end)));
-				if ((uname in info.accounts)) {
+				var uname = (data.slice(3,end));
+				var password = (data.slice(end+1, 1+end+data.charCodeAt(end)));
+				if (info.accounts.indexOf(uname) >= 0) {
 					console.error("Attempting to create existing user");
-					sp.write(new Buffer([reg, 0xEF]));
+					sp.write(new Buffer([req, 0xEF]));
 					break;
 				}
 				info.accounts.push(uname);
@@ -117,14 +118,24 @@ function startup() {
 				sp.write(new Buffer([req, 0xF1]));
 				break;
 			case 0x11:
+				if (!decrypted) {
+					console.error("Attempting to save password for non-available database");
+					sp.write(new Buffer([req, 0xEF]));
+					break;
+				}
 				var end = 3+data.charCodeAt(2)
-				var url = stringify(data.slice(3,end));
-				var fragment = stringify(data.slice(end+1, end+data.charCodeAt(end)));
+				var url = (data.slice(3,end));
+				var fragment = (data.slice(end+1,1+end+data.charCodeAt(end)));
 				decrypted.frags[url] = fragment;
 				saveDecrypted();
 				sp.write(new Buffer([req, 0xF1]));
 				break;
+			default:
+				console.error("Unknown command: "+data);
+				sp.write(new Buffer([req, 0xEF]));
+				break;
 		}
+		sp.write(new Buffer([0x0A]));
 	});
 }
 
@@ -133,16 +144,10 @@ function saveInfo() {
 }
 
 function saveDecrypted() {
-	fs.writeFile(__dirname+"/folders/"+decrypted.username+".ejson", XOR(JSON.stringify(decrypted), decrypted.password));
+	console.log(decrypted);
+	fs.writeFile(__dirname+"/folders/"+decrypted.username+".ejson", XOR(JSON.stringify(decrypted), decrypted.password), 'binary');
 }
 
-function stringify(array) {
-	var out = "";
-	for (var a = 0; a < array.length; a++) {
-		out += String.fromCharCode(array[a]);
-	}
-	return out;
-}
 
 function byteify(obj) {
 	if (typeof obj != "string") {
